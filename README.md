@@ -1,61 +1,113 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+HPP Average (FIFO-like Moving Average) – Laravel API
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+A small Laravel API that calculates cost of goods sold (COGS) using the moving average (a.k.a. weighted average) method with backdated inserts (“sisipan”) support.
+It provides CRUD endpoints for purchase/sale transactions and recalculates the entire chronology whenever data changes, while strictly enforcing “stock must never go negative”.
 
-## About Laravel
+✨ Features
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+CRUD API for transactions (purchase/sale)
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+Moving Average HPP (COGS) calculation per the given rules (see Logic)
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+Backdated inserts/updates (“sisipan”) recalc all subsequent rows
 
-## Learning Laravel
+Anti-negative stock validation (insert/update/delete)
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+Atomicity: CRUD and recalc happen inside a single DB transaction
 
-You may also try the [Laravel Bootcamp](https://bootcamp.laravel.com), where you will be guided through building a modern Laravel application from scratch.
+Form Requests validation (Store & Update)
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+MySQL storage with proper decimal precision
 
-## Laravel Sponsors
+Seed data (initial, inserted/mid-stream, final)
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+Minimal Blade UI demo (Bootstrap 5 + Tailwind via CDN) — no npm, one terminal run
 
-### Premium Partners
+🧠 Domain Logic (as required)
 
-- **[Vehikl](https://vehikl.com)**
-- **[Tighten Co.](https://tighten.co)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Redberry](https://redberry.international/laravel-development)**
-- **[Active Logic](https://activelogic.com)**
+Given a row with type = Pembelian (Purchase) or Penjualan (Sale):
 
-## Contributing
+Cost
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+Purchase: cost = price (from input)
 
-## Code of Conduct
+Sale: cost = previous HPP (moving average up to the previous row)
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+Total Cost
+total_cost = qty × cost
+(Sales use negative qty effectively; see Qty handling below.)
 
-## Security Vulnerabilities
+Qty Balance
+qty_balance = previous_qty_balance + qty_input
+For sales, the effective qty is negative.
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+Value Balance
+value_balance = previous_value_balance + total_cost
 
-## License
+HPP (Average Cost)
+hpp = value_balance / qty_balance (when qty ≠ 0)
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+Backdated Inserts (“Sisipan”)
+Any row added/edited with an earlier date affects all subsequent rows.
+
+No Negative Stock
+If at any step next_qty_balance < 0, the operation is rejected with HTTP 422.
+
+Qty input convention
+
+Purchases: qty > 0
+
+Sales: you may send negative qty (recommended, matches examples)
+If a positive qty is sent for a sale, the service normalizes it to negative during calculation.
+
+Ordering of rows
+
+Primary: date ASC
+
+Within the same date: Purchases first, then Sales
+
+Lastly: id ASC (stable tiebreaker)
+
+This mirrors typical inventory flows (buy first, then sell on the same day) and matches the provided examples.
+
+🧱 Tech Stack
+
+Laravel (v11/12)
+
+MySQL
+
+PHP ≥ 8.1
+
+Minimal Blade UI (Bootstrap 5 + Tailwind CDN with tw- prefix)
+
+📦 Data Model
+
+Table: transactions (suggested columns)
+
+id (PK)
+
+type enum/string: Pembelian | Penjualan
+
+date DATE
+
+qty DECIMAL(18,6) — raw user input (sales can be negative)
+
+price DECIMAL(18,6) nullable — required for purchases, ignored for sales
+
+Computed & persisted (for audit):
+
+qty_effective DECIMAL(18,6)
+
+cost DECIMAL(18,6)
+
+total_cost DECIMAL(18,6)
+
+qty_balance DECIMAL(18,6)
+
+value_balance DECIMAL(18,6)
+
+hpp DECIMAL(18,6)
+
+Timestamps
+
+Persisting computed columns makes it easy to audit and display the evolution of balances/HPP exactly like the sample sheet.
